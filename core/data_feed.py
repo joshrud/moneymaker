@@ -16,6 +16,8 @@ WATCHLIST = ["AAPL", "MSFT", "NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL", "JP
 # Pairs for mean-reversion bot (co-integrated pairs)
 PAIRS = [("AAPL", "MSFT"), ("NVDA", "AMD"), ("AMZN", "GOOGL")]
 
+_BATCH_SIZE = 50  # max symbols per Alpaca request to stay within rate limits
+
 
 class DataFeed:
     """
@@ -44,6 +46,38 @@ class DataFeed:
                                   limit=lookback * len(symbols))
         self._cache[cache_key] = df
         return df
+
+    def universe_bars(self, lookback: int = 252) -> pd.DataFrame:
+        """
+        Fetches daily bars for the full 261-stock UNIVERSE in batches of 50.
+        Returns a (symbol, timestamp) MultiIndex DataFrame of OHLCV data.
+        Cached for the session; call clear_cache() to refresh.
+        """
+        from core.universe import UNIVERSE
+
+        cache_key = f"universe_{lookback}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        end = datetime.now(NY).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = end - timedelta(days=lookback * 2)
+
+        chunks = [
+            UNIVERSE[i: i + _BATCH_SIZE]
+            for i in range(0, len(UNIVERSE), _BATCH_SIZE)
+        ]
+        frames = []
+        for chunk in chunks:
+            df = self.client.get_bars(
+                chunk, TimeFrame.Day, start=start, end=end,
+                limit=lookback * len(chunk),
+            )
+            if not df.empty:
+                frames.append(df)
+
+        result = pd.concat(frames) if frames else pd.DataFrame()
+        self._cache[cache_key] = result
+        return result
 
     def pivot_close(self, symbols: list = None, lookback: int = 60) -> pd.DataFrame:
         """Returns a (date × symbol) DataFrame of closing prices."""
