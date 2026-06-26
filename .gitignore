@@ -1,0 +1,20 @@
+# Credentials
+.env
+
+# Generated outputs
+logs/
+reports/
+*.xlsx
+~$*.xlsx
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# IDE / local tooling
+.claude/
+.DS_Store
