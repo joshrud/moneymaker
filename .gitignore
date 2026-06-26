@@ -6,6 +6,7 @@ logs/
 reports/
 *.xlsx
 ~$*.xlsx
+models/
 
 # Python
 .venv/

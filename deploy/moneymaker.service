@@ -1,0 +1,21 @@
+[Unit]
+Description=Moneymaker Algorithmic Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=moneymaker
+Group=moneymaker
+WorkingDirectory=/opt/moneymaker
+ExecStart=/opt/moneymaker/.venv/bin/python scripts/run_all_bots.py --loop
+Restart=always
+RestartSec=60
+StandardOutput=append:/opt/moneymaker/logs/service.log
+StandardError=append:/opt/moneymaker/logs/service.log
+# Give up after 5 rapid restarts in 10 minutes (prevents crash loops burning API quota)
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
