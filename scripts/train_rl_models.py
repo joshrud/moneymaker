@@ -21,38 +21,41 @@ from core.logger import TradeLogger
 
 
 def train_bot2(feed: DataFeed, steps: int = 100_000):
-    """Trains the SAC portfolio model and saves to models/bot2_sac.zip."""
+    """
+    Trains the two-stage SAC portfolio model and saves to models/bot2_sac.zip.
+
+    Stage 1: StockSelector scores the full 261-stock universe and picks the
+             top 20 stocks (at least 1 per GICS sector) from 2 years of data.
+    Stage 2: SAC trains on those 20 stocks using TradingEnv.
+    """
     from stable_baselines3 import SAC
-    from envs.trading_env import TradingEnv
-    from core.data_feed import WATCHLIST
-    from core.indicators import rsi, macd
-    import pandas as pd
+    from bots.bot2_sac_rl import _build_env, TOP_N, LOOKBACK
+    from core.stock_selector import StockSelector
 
     logger = TradeLogger("train_bot2_sac")
-    assets = ["AAPL", "MSFT", "NVDA", "TSLA", "META"]
-    model_path = Path("models/bot2_sac")
+    model_path = Path(__file__).resolve().parent.parent / "models" / "bot2_sac"
     model_path.parent.mkdir(exist_ok=True)
 
-    print(f"Training SAC (Bot 2) for {steps:,} steps...")
-    bars = feed.daily_bars(assets, lookback=504)
-    closes = bars["close"].unstack(level=0).reindex(columns=assets).dropna()
+    print("Fetching universe bars for 261 stocks (this may take ~60 s)...")
+    bars = feed.universe_bars(lookback=504)
 
-    ind_cols = {}
-    for sym in assets:
-        close_s = closes[sym]
-        ind_cols[f"{sym}_rsi"] = rsi(close_s).fillna(50) / 100.0
-        mdf = macd(close_s)
-        ind_cols[f"{sym}_macd"] = (mdf["histogram"] / closes[sym].mean()).fillna(0)
-    ind_df = pd.DataFrame(ind_cols, index=closes.index).fillna(0)
+    selector = StockSelector(top_n=TOP_N, min_per_sector=1)
+    env = _build_env(bars, selector, LOOKBACK)
+    if env is None:
+        print("ERROR: could not build training environment — insufficient data.")
+        return
 
-    env = TradingEnv(closes, ind_df, lookback=20)
-    model = SAC("MlpPolicy", env, verbose=1, learning_rate=3e-4,
-                buffer_size=50_000, batch_size=256, gamma=0.99,
-                ent_coef="auto", device="cpu")
+    n_assets = env.n_assets
+    print(f"Training SAC on {n_assets} selected stocks for {steps:,} steps...")
+    model = SAC(
+        "MlpPolicy", env, verbose=1, learning_rate=3e-4,
+        buffer_size=50_000, batch_size=256, gamma=0.99,
+        ent_coef="auto", device="cpu",
+    )
     model.learn(total_timesteps=steps)
     model.save(str(model_path))
     print(f"Bot 2 SAC model saved to {model_path}.zip")
-    logger.log("training_complete", steps=steps, path=str(model_path))
+    logger.log("training_complete", steps=steps, n_assets=n_assets, path=str(model_path))
 
 
 def train_bot4(feed: DataFeed, steps: int = 50_000):

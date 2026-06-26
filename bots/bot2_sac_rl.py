@@ -1,10 +1,15 @@
 """
-Bot 2 — SAC Reinforcement Learning Portfolio Manager
-Algorithm: Soft Actor-Critic (off-policy, continuous actions) via stable-baselines3.
-Action: portfolio weights across N assets (softmax normalised).
-Reward: incremental Sharpe ratio minus transaction cost penalty.
-Model is trained offline on 2 years of historical data; loaded at runtime.
-Auto-trains if no saved model is found in models/.
+Bot 2 — Two-Stage SAC Portfolio Manager
+
+Stage 1 (StockSelector): scores all 261 universe stocks on momentum + volatility
+  factors and picks the top TOP_N with at least one per GICS sector.
+
+Stage 2 (SAC): allocates capital across the selected TOP_N stocks using a
+  trained Soft Actor-Critic policy. Action/obs dimensions are fixed at TOP_N,
+  so the model is retrained whenever TOP_N changes.
+
+The model is trained offline via scripts/train_rl_models.py. It auto-trains
+from scratch if no saved model is found.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -15,29 +20,31 @@ import pandas as pd
 
 from bots.base_bot import BaseBot
 from core.alpaca_client import AlpacaClient
-from core.data_feed import DataFeed, WATCHLIST
+from core.data_feed import DataFeed
 from core.indicators import rsi, macd
+from core.stock_selector import StockSelector
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "bot2_sac"
-SAC_ASSETS = ["AAPL", "MSFT", "NVDA", "TSLA", "META"]  # 5-asset portfolio
-LOOKBACK = 20
+TOP_N = 20       # number of stocks SAC allocates across
+LOOKBACK = 20    # observation window (trading days)
 TRAIN_STEPS = 50_000
 
 
 class SACBot(BaseBot):
     """
-    SAC-based continuous portfolio manager.
-    Allocates capital across SAC_ASSETS using a trained SAC policy.
+    Two-stage portfolio manager: factor-select TOP_N stocks, then SAC allocates.
     """
 
     def __init__(self, client: AlpacaClient, feed: DataFeed):
         super().__init__("bot2_sac_rl", client, feed)
-        self.assets = SAC_ASSETS
+        self.selector = StockSelector(top_n=TOP_N, min_per_sector=1)
+        self._selected: list[str] = []   # refreshed each run_once()
         self.model = None
         self._load_or_train()
 
+    # ── model lifecycle ────────────────────────────────────────────────────────
+
     def _load_or_train(self):
-        """Load existing model or train from scratch on historical data."""
         from stable_baselines3 import SAC
 
         if MODEL_PATH.with_suffix(".zip").exists():
@@ -46,99 +53,119 @@ class SACBot(BaseBot):
             return
 
         self.logger.log("training_start", steps=TRAIN_STEPS)
-        env = self._build_env()
+        env = self._build_env_from_feed()
         if env is None:
-            self.logger.log("training_skipped", reason="insufficient historical data")
+            self.logger.log("training_skipped", reason="insufficient data")
             return
 
-        self.model = SAC("MlpPolicy", env, verbose=0, learning_rate=3e-4,
-                         buffer_size=10_000, batch_size=256, gamma=0.99,
-                         ent_coef="auto", device="cpu")
+        self.model = SAC(
+            "MlpPolicy", env, verbose=0, learning_rate=3e-4,
+            buffer_size=10_000, batch_size=256, gamma=0.99,
+            ent_coef="auto", device="cpu",
+        )
         self.model.learn(total_timesteps=TRAIN_STEPS)
         MODEL_PATH.parent.mkdir(exist_ok=True)
         self.model.save(str(MODEL_PATH))
         self.logger.log("training_done", path=str(MODEL_PATH))
 
-    def _build_env(self):
-        """Constructs a TradingEnv from 2 years of historical data."""
-        from envs.trading_env import TradingEnv
+    def _build_env_from_feed(self):
+        """Fetches universe bars, selects top stocks, returns a TradingEnv."""
         try:
-            bars = self.feed.daily_bars(self.assets, lookback=504)  # ~2 years
-            closes = bars["close"].unstack(level=0).reindex(columns=self.assets).dropna()
-            if len(closes) < LOOKBACK + 10:
-                return None
-
-            # Build indicator matrix: RSI and MACD hist for each asset
-            ind_cols = {}
-            for sym in self.assets:
-                close_s = closes[sym]
-                ind_cols[f"{sym}_rsi"] = rsi(close_s).fillna(50) / 100.0  # normalise to [0,1]
-                mdf = macd(close_s)
-                # Normalise MACD histogram by price scale
-                ind_cols[f"{sym}_macd"] = (mdf["histogram"] / closes[sym].mean()).fillna(0)
-            ind_df = pd.DataFrame(ind_cols, index=closes.index).fillna(0)
-
-            return TradingEnv(closes, ind_df, lookback=LOOKBACK)
+            bars = self.feed.universe_bars(lookback=504)
+            return _build_env(bars, self.selector, LOOKBACK)
         except Exception as e:
             self.logger.log("env_build_error", error=str(e))
             return None
 
-    def generate_signals(self, bars_df: pd.DataFrame) -> Dict[str, float]:
-        """Uses the SAC policy to compute portfolio weights, returns per-asset signals."""
-        if self.model is None:
-            return {sym: 0.0 for sym in self.assets}
+    # ── signal generation ──────────────────────────────────────────────────────
 
-        obs = self._build_observation(bars_df)
+    def generate_signals(self, bars_df: pd.DataFrame) -> Dict[str, float]:
+        if self.model is None:
+            return {}
+
+        # Stage 1: select today's top-N stocks
+        closes_all = bars_df["close"].unstack(level=0) if isinstance(
+            bars_df.index, pd.MultiIndex) else bars_df
+        self._selected = self.selector.select(closes_all)
+        if not self._selected:
+            return {}
+
+        # Stage 2: build obs and run SAC policy
+        obs = self._build_observation(closes_all, self._selected)
         if obs is None:
-            return {sym: 0.0 for sym in self.assets}
+            return {sym: 0.0 for sym in self._selected}
 
         action, _ = self.model.predict(obs, deterministic=True)
-        # Convert action to portfolio weights via softmax
         exp_a = np.exp(action - action.max())
-        weights = exp_a / exp_a.sum()
+        weights = exp_a / exp_a.sum()  # softmax → portfolio weights
 
-        # weights[-1] is cash allocation; first N are assets
         signals = {}
-        for i, sym in enumerate(self.assets):
-            target_weight = float(weights[i])
-            current_weight = self._current_weight(sym)
-            # Signal = difference from current allocation, capped to [-1, +1]
-            signals[sym] = np.clip(target_weight - current_weight, -1.0, 1.0)
+        for i, sym in enumerate(self._selected):
+            target_w = float(weights[i])
+            current_w = self._current_weight(sym)
+            signals[sym] = float(np.clip(target_w - current_w, -1.0, 1.0))
             self.logger.log_signal(sym, signals[sym],
-                                   reason=f"sac_weight={target_weight:.3f}")
-
+                                   reason=f"sac_weight={target_w:.3f}")
         return signals
 
-    def _build_observation(self, bars_df: pd.DataFrame):
-        """Constructs the observation vector matching the training env."""
+    def _build_observation(self, closes: pd.DataFrame, symbols: list[str]):
         try:
-            closes = bars_df["close"].unstack(level=0).reindex(columns=self.assets).dropna()
-            if len(closes) < LOOKBACK:
+            sub = closes.reindex(columns=symbols).dropna(axis=1)
+            if len(sub) < LOOKBACK or sub.shape[1] < len(symbols):
                 return None
 
-            window = closes.iloc[-LOOKBACK:].values.astype(np.float32)
+            window = sub.iloc[-LOOKBACK:].values.astype(np.float32)
             log_rets = np.diff(np.log(window + 1e-8), axis=0).flatten()
 
             ind_parts = []
-            for sym in self.assets:
-                close_s = closes[sym]
+            for sym in symbols:
+                close_s = sub[sym]
                 r = float(rsi(close_s).iloc[-1]) / 100.0 if len(close_s) >= 14 else 0.5
-                m = macd(close_s)["histogram"].iloc[-1]
-                m_norm = float(m / (close_s.mean() + 1e-8))
-                ind_parts.extend([r, m_norm])
+                m_hist = macd(close_s)["histogram"].iloc[-1]
+                ind_parts.extend([r, float(m_hist / (close_s.mean() + 1e-8))])
 
-            # Current weights
-            current_weights = np.array([self._current_weight(s) for s in self.assets] + [0.0],
-                                        dtype=np.float32)
-            obs = np.concatenate([log_rets, ind_parts, current_weights]).astype(np.float32)
-            return obs
+            current_weights = np.array(
+                [self._current_weight(s) for s in symbols] + [0.0], dtype=np.float32
+            )
+            return np.concatenate([log_rets, ind_parts, current_weights]).astype(np.float32)
         except Exception:
             return None
 
     def _current_weight(self, symbol: str) -> float:
-        """Returns symbol's current weight in virtual portfolio."""
         pv = self.portfolio.total_value
         if pv <= 0 or symbol not in self.portfolio.positions:
             return 0.0
         pos = self.portfolio.positions[symbol]
         return (pos.qty * pos.avg_cost) / pv
+
+
+# ── shared helper used by both SACBot and train_rl_models.py ──────────────────
+
+def _build_env(universe_bars: pd.DataFrame, selector: StockSelector, lookback: int):
+    """
+    Given raw universe bars, runs stock selection and returns a TradingEnv
+    over the selected stocks. Returns None if data is insufficient.
+    """
+    from envs.trading_env import TradingEnv
+
+    if universe_bars.empty:
+        return None
+
+    closes_all = universe_bars["close"].unstack(level=0)
+    selected = selector.select(closes_all)
+    if not selected:
+        return None
+
+    closes = closes_all.reindex(columns=selected).dropna()
+    if len(closes) < lookback + 10:
+        return None
+
+    ind_cols = {}
+    for sym in selected:
+        close_s = closes[sym]
+        ind_cols[f"{sym}_rsi"] = rsi(close_s).fillna(50) / 100.0
+        mdf = macd(close_s)
+        ind_cols[f"{sym}_macd"] = (mdf["histogram"] / (close_s.mean() + 1e-8)).fillna(0)
+    ind_df = pd.DataFrame(ind_cols, index=closes.index).fillna(0)
+
+    return TradingEnv(closes, ind_df, lookback=lookback)
