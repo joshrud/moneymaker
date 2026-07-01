@@ -37,6 +37,14 @@ class ClaudeSentimentBot(BaseBot):
         """
         Fetches news → scores sentiment → filters with technicals → returns signals.
         """
+        # Bail out if market closes within 10 min — Claude API latency can push execution past 4pm
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+        if now.hour == 15 and now.minute >= 50:
+            self.logger.log("skipped", reason="within 10 min of market close")
+            return {sym: 0.0 for sym in self.watchlist}
+
         # Fetch recent news headlines
         try:
             news_items = self.feed.get_news(self.watchlist, limit=30)

@@ -88,8 +88,11 @@ class AlpacaClient:
         """
         req = NewsRequest(symbols=",".join(symbols), limit=limit)
         news_set = self.news_client.get_news(req)
-        # news_set.data["news"] is a list of dicts
-        return news_set.data.get("news", [])
+        data = news_set.data
+        # API returns either {"news": [...]} or [...] depending on SDK version
+        if isinstance(data, list):
+            return data
+        return data.get("news", [])
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

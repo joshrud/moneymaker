@@ -17,9 +17,10 @@ from core.logger import TradeLogger, LOGS_DIR
 from datetime import date, timedelta
 
 
-CONSENSUS_THRESHOLD = 0.35   # minimum weighted signal to place a real order
+CONSENSUS_THRESHOLD = 0.20   # minimum weighted signal to place a real order
 MIN_WEIGHT = 0.05             # floor weight for bots with no history (equal-weight fallback)
 REAL_TRADE_MAX_PCT = 0.10     # max 10% of paper account per real trade
+MAX_POSITION_PCT = 0.25       # won't add to a position if it already exceeds 25% of portfolio
 
 
 class EnsembleBot(BaseBot):
@@ -104,19 +105,27 @@ class EnsembleBot(BaseBot):
         """Places a real market order on the Alpaca paper account."""
         try:
             account = self.client.get_account()
+            portfolio_value = float(account.equity)
             buying_power = float(account.buying_power)
-            alloc = buying_power * REAL_TRADE_MAX_PCT
-            qty = round(alloc / price, 2)
-            if qty < 0.01:
-                return
 
             if signal > 0:
+                # Don't add if position already at or above the cap
+                positions = self.client.get_positions()
+                if symbol in positions:
+                    current_market_val = float(positions[symbol].market_value)
+                    if current_market_val / max(portfolio_value, 1) >= MAX_POSITION_PCT:
+                        self.logger.log("real_trade_skipped", symbol=symbol,
+                                        reason=f"position_cap={MAX_POSITION_PCT}")
+                        return
+                alloc = buying_power * REAL_TRADE_MAX_PCT
+                qty = round(alloc / price, 2)
+                if qty < 0.01:
+                    return
                 order = self.client.market_buy(symbol, qty)
                 self.logger.log("real_trade", side="buy", symbol=symbol, qty=qty,
                                 price=price, order_id=str(order.id),
                                 reason=f"ensemble_signal={signal:.3f}")
             elif signal < 0:
-                # Only sell if we hold a position
                 positions = self.client.get_positions()
                 if symbol in positions:
                     order = self.client.close_position(symbol)

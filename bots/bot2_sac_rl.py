@@ -77,13 +77,30 @@ class SACBot(BaseBot):
             self.logger.log("env_build_error", error=str(e))
             return None
 
+    def run_once(self) -> dict:
+        """Overrides base: fetches universe bars (not just WATCHLIST) before signalling."""
+        from core.data_feed import DataFeed
+        bars_df = self.feed.universe_bars(lookback=LOOKBACK * 3)
+        prices = self.feed.latest_prices()
+        portfolio_val = self.portfolio.mark_to_market(prices)
+        if self.risk.check_circuit_breaker(portfolio_val):
+            self.logger.log("circuit_breaker", reason="daily loss limit hit")
+            return self._end_of_cycle(prices)
+        signals = self.generate_signals(bars_df)
+        for symbol, signal in signals.items():
+            price = prices.get(symbol)
+            if price is None:
+                continue
+            self._execute_signal(symbol, signal, price, portfolio_val)
+        return self._end_of_cycle(prices)
+
     # ── signal generation ──────────────────────────────────────────────────────
 
     def generate_signals(self, bars_df: pd.DataFrame) -> Dict[str, float]:
         if self.model is None:
             return {}
 
-        # Stage 1: select today's top-N stocks
+        # Stage 1: select today's top-N stocks from universe bars
         closes_all = bars_df["close"].unstack(level=0) if isinstance(
             bars_df.index, pd.MultiIndex) else bars_df
         self._selected = self.selector.select(closes_all)
