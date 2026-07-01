@@ -112,9 +112,13 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/logs" "$INSTALL_DIR/models"
 # ── 7. systemd service ─────────────────────────────────────────────────────────
 echo "[7/7] Installing systemd service..."
 cp "$INSTALL_DIR/deploy/moneymaker.service" /etc/systemd/system/moneymaker.service
+cp "$INSTALL_DIR/deploy/moneymaker-train.service" /etc/systemd/system/moneymaker-train.service
+cp "$INSTALL_DIR/deploy/moneymaker-train.timer"   /etc/systemd/system/moneymaker-train.timer
 systemctl daemon-reload
 systemctl enable moneymaker
-echo "      Service installed and enabled (not started yet — fill in .env first)."
+systemctl enable --now moneymaker-train.timer
+echo "      Services installed. Bot service enabled (start after filling .env)."
+echo "      Training timer enabled and running (next fire: $(systemctl show moneymaker-train.timer --property=NextElapseUSecRealtime --value))"
 
 # ── Done ───────────────────────────────────────────────────────────────────────
 echo ""

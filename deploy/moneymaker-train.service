@@ -1,0 +1,15 @@
+[Unit]
+Description=Moneymaker RL Model Training (pre-market)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=moneymaker
+Group=moneymaker
+WorkingDirectory=/opt/moneymaker
+ExecStart=/opt/moneymaker/.venv/bin/python scripts/train_rl_models.py --bot2-only
+StandardOutput=append:/opt/moneymaker/logs/retrain.log
+StandardError=append:/opt/moneymaker/logs/retrain.log
+# Training can take up to 90 min; don't let systemd kill it early
+TimeoutStartSec=7200

@@ -1,0 +1,11 @@
+[Unit]
+Description=Train Moneymaker RL models 1 hour before market open (8:30 AM ET, Mon–Fri)
+
+[Timer]
+# America/New_York handles DST automatically (EDT in summer, EST in winter)
+OnCalendar=Mon..Fri 08:30 America/New_York
+# If the server was down at fire time, run once it comes back up
+Persistent=true
+
+[Install]
+WantedBy=timers.target
