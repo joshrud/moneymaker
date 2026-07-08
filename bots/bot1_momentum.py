@@ -74,9 +74,9 @@ class MomentumBot(BaseBot):
             if bb_pct_b > 0.9:
                 exit_score += 0.2
 
-            if exit_score > 0.4:
+            if exit_score > 0.2:
                 signals[symbol] = -exit_score  # signal to close / avoid
-            elif long_score > 0.4:
+            elif long_score > 0.2:
                 signals[symbol] = long_score
             else:
                 signals[symbol] = 0.0
