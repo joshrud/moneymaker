@@ -206,6 +206,30 @@ def train_bot9(feed, steps=75_000):
     logger.log("training_complete", symbol=sym, steps=steps)
 
 
+def train_bot14(feed, steps=75_000):
+    """Trains PPO deep hedging model for bot14."""
+    from stable_baselines3 import PPO
+    from core.stock_selector import StockSelector
+    from bots.bot14_deep_hedging import _build_deep_hedging_env
+    logger = TradeLogger("train_bot14_deep_hedging")
+    model_path = Path(__file__).resolve().parent.parent / "models" / "bot14_deep_hedging"
+    model_path.parent.mkdir(exist_ok=True)
+    print("Fetching bars for bot14 deep hedging...")
+    bars = feed.universe_bars(lookback=504)
+    selector = StockSelector(top_n=20, min_per_sector=1)
+    env = _build_deep_hedging_env(bars, selector, lookback=30)
+    if env is None:
+        print("ERROR: could not build bot14 deep hedging env.")
+        return
+    print(f"Training bot14 PPO deep hedging for {steps:,} steps...")
+    model = PPO("MlpPolicy", env, verbose=1, learning_rate=3e-4,
+                n_steps=1024, batch_size=64, gamma=0.99, ent_coef=0.01, device="cpu")
+    model.learn(total_timesteps=steps)
+    model.save(str(model_path))
+    print(f"Bot 14 saved to {model_path}.zip")
+    logger.log("training_complete", steps=steps)
+
+
 def train_bot11(feed, steps=50_000):
     """Trains two SAC models for bot11: one trend, one ranging."""
     from stable_baselines3 import SAC
@@ -268,11 +292,7 @@ def main():
     if args.new_bots or args.bot11_only:
         train_bot11(feed)
     if args.new_bots or args.bot14_only:
-        try:
-            from scripts.train_rl_models import train_bot14
-            train_bot14(feed)
-        except ImportError:
-            print("train_bot14 not yet defined — skipping")
+        train_bot14(feed)
     print("\nAll training complete.")
 
 
