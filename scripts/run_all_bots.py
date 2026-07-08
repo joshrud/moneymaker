@@ -27,28 +27,45 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from core.alpaca_client import AlpacaClient
 from core.data_feed import DataFeed
 from core.reporter import generate_report
-from bots import MomentumBot, SACBot, ClaudeSentimentBot, FinBERTPPOBot, EnsembleBot
+from bots import (
+    MomentumBot, SACBot, ClaudeSentimentBot, FinBERTPPOBot, EnsembleBot,
+    EMABot, TD3PairsBot, SortinoSACBot, DQNVWAPBot, LGBMFactorBot,
+    RegimeSACBot, CoveredCallBot, CSPBot, DeepHedgingBot, AggressiveEnsembleBot,
+)
 
 NY = ZoneInfo("America/New_York")
 CYCLE_SECONDS = 300  # 5-minute cycle during market hours
 
 
 def build_bots(client: AlpacaClient, feed: DataFeed):
-    """Instantiates all 5 bots. SAC and PPO auto-train if no model exists."""
+    """Instantiates all 15 bots. RL models auto-train if no model exists."""
     print("Initialising bots (RL models will train if not found)...")
     bot1 = MomentumBot(client, feed)
     bot2 = SACBot(client, feed)
     bot3 = ClaudeSentimentBot(client, feed)
     bot4 = FinBERTPPOBot(client, feed)
     bot5 = EnsembleBot(client, feed, sub_bots=[bot1, bot2, bot3, bot4])
-    return [bot1, bot2, bot3, bot4, bot5]
+    bot6 = EMABot(client, feed)
+    bot7 = TD3PairsBot(client, feed)
+    bot8 = SortinoSACBot(client, feed)
+    bot9 = DQNVWAPBot(client, feed)
+    bot10 = LGBMFactorBot(client, feed)
+    bot11 = RegimeSACBot(client, feed)
+    bot12 = CoveredCallBot(client, feed)
+    bot13 = CSPBot(client, feed)
+    bot14 = DeepHedgingBot(client, feed)
+    bot15 = AggressiveEnsembleBot(client, feed, sub_bots=[
+        bot6, bot7, bot8, bot9, bot10, bot11, bot12, bot13, bot14,
+    ])
+    return [bot1, bot2, bot3, bot4, bot5, bot6, bot7, bot8, bot9, bot10,
+            bot11, bot12, bot13, bot14, bot15]
 
 
 def run_cycle(bots: list, feed: DataFeed) -> list[dict]:
     """Runs all bots in parallel for one cycle. Returns their summaries."""
     feed.clear_cache()  # refresh data each cycle
     results = []
-    with ThreadPoolExecutor(max_workers=5) as ex:
+    with ThreadPoolExecutor(max_workers=15) as ex:
         futures = {ex.submit(bot.run_once): bot.name for bot in bots}
         for fut in as_completed(futures):
             name = futures[fut]
@@ -71,7 +88,7 @@ def is_market_hours(client: AlpacaClient) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run all 5 trading bots")
+    parser = argparse.ArgumentParser(description="Run all 15 trading bots")
     parser.add_argument("--loop", action="store_true", help="Loop every 5 min during market hours")
     parser.add_argument("--force", action="store_true", help="Run even if market is closed (testing)")
     args = parser.parse_args()
