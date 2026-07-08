@@ -53,9 +53,20 @@ def stoch_rsi(close: pd.Series, window: int = 14, smooth: int = 3) -> pd.DataFra
     return pd.DataFrame({"stoch_rsi_k": ind.stochrsi_k(), "stoch_rsi_d": ind.stochrsi_d()})
 
 
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume."""
+    return ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
+
+
+def adx(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+    """Average Directional Index — trend strength 0-100."""
+    return ta.trend.ADXIndicator(high, low, close, window=window).adx()
+
+
 def compute_all(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Appends RSI, MACD histogram, BB %B, ATR, and EMA20 to an OHLCV DataFrame.
+    Appends RSI, MACD histogram, BB %B, ATR, EMA20, EMA50, EMA8, EMA55, OBV, ADX
+    to an OHLCV DataFrame.
     Expects columns: open, high, low, close, volume.
     """
     out = df.copy()
@@ -71,4 +82,8 @@ def compute_all(df: pd.DataFrame) -> pd.DataFrame:
     out["atr"] = atr(df["high"], df["low"], df["close"])
     out["ema20"] = ema(df["close"])
     out["ema50"] = ema(df["close"], window=50)
+    out["ema8"] = ema(df["close"], window=8)
+    out["ema55"] = ema(df["close"], window=55)
+    out["obv"] = obv(df["close"], df["volume"])
+    out["adx"] = adx(df["high"], df["low"], df["close"])
     return out
