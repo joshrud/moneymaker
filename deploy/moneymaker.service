@@ -2,6 +2,9 @@
 Description=Moneymaker Algorithmic Trading Bot
 After=network-online.target
 Wants=network-online.target
+# Give up after 5 rapid restarts in 10 minutes (prevents crash loops burning API quota)
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,9 +16,6 @@ Restart=always
 RestartSec=60
 StandardOutput=append:/opt/moneymaker/logs/service.log
 StandardError=append:/opt/moneymaker/logs/service.log
-# Give up after 5 rapid restarts in 10 minutes (prevents crash loops burning API quota)
-StartLimitIntervalSec=600
-StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target

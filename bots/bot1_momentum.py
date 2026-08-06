@@ -23,7 +23,8 @@ class MomentumBot(BaseBot):
 
     def __init__(self, client: AlpacaClient, feed: DataFeed):
         super().__init__("bot1_momentum", client, feed)
-        self.watchlist = WATCHLIST
+        from core.dynamic_watchlist import active_symbols
+        self.watchlist = list(dict.fromkeys(WATCHLIST + active_symbols()))
 
     def generate_signals(self, bars_df: pd.DataFrame) -> Dict[str, float]:
         """

@@ -1,0 +1,50 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [prod]
+
+# Required for OIDC token exchange with AWS
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to EC2 via SSM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials (OIDC — no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Send deploy command via SSM
+        id: deploy
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=instanceids,Values=${{ vars.EC2_INSTANCE_ID }}" \
+            --parameters '{"commands":["bash /opt/moneymaker/deploy/deploy.sh"]}' \
+            --timeout-seconds 120 \
+            --query "Command.CommandId" \
+            --output text)
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command sent: $COMMAND_ID"
+
+      - name: Wait for deploy to complete
+        run: |
+          aws ssm wait command-executed \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ vars.EC2_INSTANCE_ID }}"
+
+      - name: Show deploy output
+        if: always()
+        run: |
+          aws ssm get-command-invocation \
+            --command-id "${{ steps.deploy.outputs.command_id }}" \
+            --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
+            --query "[StatusDetails, StandardOutputContent, StandardErrorContent]" \
+            --output text
