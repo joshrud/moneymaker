@@ -45,9 +45,10 @@ class BaseBot(ABC):
         Full cycle: fetch data → generate signals → execute virtual trades → log.
         Returns summary dict.
         """
-        # Fetch data
-        bars_df = self.feed.daily_bars()
-        prices = self.feed.latest_prices()
+        # Fetch data — use self.watchlist if the subclass sets one
+        watchlist = getattr(self, "watchlist", None)
+        bars_df = self.feed.daily_bars(watchlist)
+        prices = self.feed.latest_prices(watchlist)
 
         # Circuit breaker
         portfolio_val = self.portfolio.mark_to_market(prices)

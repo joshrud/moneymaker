@@ -16,7 +16,8 @@ from core.indicators import compute_all, ema, obv
 class EMABot(BaseBot):
     def __init__(self, client: AlpacaClient, feed: DataFeed):
         super().__init__("bot6_ema_trend", client, feed)
-        self.watchlist = WATCHLIST
+        from core.dynamic_watchlist import active_symbols
+        self.watchlist = list(dict.fromkeys(WATCHLIST + active_symbols()))
 
     def generate_signals(self, bars_df: pd.DataFrame) -> Dict[str, float]:
         signals = {}
