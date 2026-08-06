@@ -9,8 +9,14 @@ from pathlib import Path
 from core.logger import TradeLogger, LOGS_DIR
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
-BOT_NAMES = ["bot1_momentum", "bot2_sac_rl", "bot3_sentiment_claude",
-             "bot4_finbert_ppo", "bot5_ensemble"]
+BOT_NAMES = [
+    "bot1_momentum", "bot2_sac_rl", "bot3_sentiment_claude",
+    "bot4_finbert_ppo", "bot5_ensemble",
+    "bot6_ema_trend", "bot7_td3_pairs", "bot8_sac_sortino",
+    "bot9_dqn_vwap", "bot10_lgbm_factor", "bot11_regime_sac",
+    "bot12_covered_calls", "bot13_csp_seller", "bot14_deep_hedging",
+    "bot15_aggressive_ensemble",
+]
 
 
 def _summarise_bot(bot_name: str, dt: date) -> dict:
@@ -65,7 +71,7 @@ def generate_report(dt: date = None) -> str:
         "|------|-----|--------|-----------|-------------|-----------------|--------|--------------|",
     ]
 
-    medal = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    medal = ["🥇", "🥈", "🥉"] + [f"{i}." for i in range(4, len(BOT_NAMES) + 1)]
     for i, s in enumerate(stats_sorted):
         pnl_sign = "+" if s["daily_pnl"] >= 0 else ""
         lines.append(
