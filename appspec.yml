@@ -1,0 +1,39 @@
+version: 0.0
+os: linux
+
+files:
+  - source: /
+    destination: /opt/moneymaker
+    overwrite: yes
+
+permissions:
+  - object: /opt/moneymaker
+    owner: moneymaker
+    group: moneymaker
+    mode: "644"
+    type:
+      - file
+  - object: /opt/moneymaker/deploy
+    owner: root
+    group: root
+    mode: "755"
+    type:
+      - file
+
+hooks:
+  BeforeInstall:
+    - location: deploy/stop.sh
+      timeout: 30
+      runas: root
+  AfterInstall:
+    - location: deploy/install.sh
+      timeout: 300
+      runas: root
+  ApplicationStart:
+    - location: deploy/start.sh
+      timeout: 30
+      runas: root
+  ValidateService:
+    - location: deploy/validate.sh
+      timeout: 30
+      runas: root

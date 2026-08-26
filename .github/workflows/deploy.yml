@@ -4,47 +4,84 @@ on:
   push:
     branches: [prod]
 
-# Required for OIDC token exchange with AWS
+# Required for GitHub OIDC → AWS IAM token exchange
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  deploy:
-    name: Deploy to EC2 via SSM
+  test:
+    name: Run tests
     runs-on: ubuntu-latest
 
     steps:
-      - name: Configure AWS credentials (OIDC — no stored keys)
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  deploy:
+    name: Deploy via CodeDeploy
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Send deploy command via SSM
+      - name: Package and upload to S3
+        run: |
+          zip -r deploy-${{ github.sha }}.zip . \
+            --exclude ".git/*" \
+            --exclude ".github/*" \
+            --exclude ".venv/*" \
+            --exclude "__pycache__/*" \
+            --exclude "*.pyc" \
+            --exclude ".env" \
+            --exclude "models/*" \
+            --exclude "logs/*" \
+            --exclude "reports/*"
+
+          aws s3 cp deploy-${{ github.sha }}.zip \
+            s3://${{ vars.S3_DEPLOY_BUCKET }}/moneymaker/deploy-${{ github.sha }}.zip
+
+      - name: Create CodeDeploy deployment
         id: deploy
         run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --targets "Key=instanceids,Values=${{ vars.EC2_INSTANCE_ID }}" \
-            --parameters '{"commands":["bash /opt/moneymaker/deploy/deploy.sh"]}' \
-            --timeout-seconds 120 \
-            --query "Command.CommandId" \
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name moneymaker \
+            --deployment-group-name moneymaker-production \
+            --s3-location bucket=${{ vars.S3_DEPLOY_BUCKET }},key=moneymaker/deploy-${{ github.sha }}.zip,bundleType=zip \
+            --deployment-config-name CodeDeployDefault.OneAtATime \
+            --description "git ${{ github.sha }}: ${{ github.event.head_commit.message }}" \
+            --query "deploymentId" \
             --output text)
-          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
-          echo "SSM command sent: $COMMAND_ID"
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "Deployment started: $DEPLOYMENT_ID"
 
-      - name: Wait for deploy to complete
+      - name: Wait for deployment
         run: |
-          aws ssm wait command-executed \
-            --command-id "${{ steps.deploy.outputs.command_id }}" \
-            --instance-id "${{ vars.EC2_INSTANCE_ID }}"
+          aws deploy wait deployment-successful \
+            --deployment-id ${{ steps.deploy.outputs.deployment_id }}
 
-      - name: Show deploy output
+      - name: Show deployment result
         if: always()
         run: |
-          aws ssm get-command-invocation \
-            --command-id "${{ steps.deploy.outputs.command_id }}" \
-            --instance-id "${{ vars.EC2_INSTANCE_ID }}" \
-            --query "[StatusDetails, StandardOutputContent, StandardErrorContent]" \
-            --output text
+          aws deploy get-deployment \
+            --deployment-id ${{ steps.deploy.outputs.deployment_id }} \
+            --query "deploymentInfo.{Status:status,Error:errorInformation}" \
+            --output table
