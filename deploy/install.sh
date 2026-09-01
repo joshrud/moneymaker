@@ -12,6 +12,7 @@ fi
 
 # Create venv if it doesn't exist (e.g. first deploy or after manual rm -rf)
 if [ ! -f "$VENV/bin/pip" ]; then
+    apt-get install -y python3.12-venv
     python3 -m venv "$VENV"
     chown -R moneymaker:moneymaker "$VENV"
 fi
