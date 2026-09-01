@@ -6,20 +6,6 @@ files:
     destination: /opt/moneymaker
     overwrite: yes
 
-permissions:
-  - object: /opt/moneymaker
-    owner: moneymaker
-    group: moneymaker
-    mode: "644"
-    type:
-      - file
-  - object: /opt/moneymaker/deploy
-    owner: root
-    group: root
-    mode: "755"
-    type:
-      - file
-
 hooks:
   BeforeInstall:
     - location: deploy/stop.sh
