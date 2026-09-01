@@ -10,6 +10,12 @@ if ! id -u moneymaker &>/dev/null; then
     useradd --system --no-create-home --shell /usr/sbin/nologin moneymaker
 fi
 
+# Create venv if it doesn't exist (e.g. first deploy or after manual rm -rf)
+if [ ! -f "$VENV/bin/pip" ]; then
+    python3 -m venv "$VENV"
+    chown -R moneymaker:moneymaker "$VENV"
+fi
+
 # Ensure runtime dirs exist with correct ownership (never overwritten by CodeDeploy)
 for dir in logs reports models; do
     mkdir -p "$APP/$dir"
