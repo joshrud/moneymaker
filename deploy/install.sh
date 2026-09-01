@@ -5,6 +5,11 @@ set -euo pipefail
 APP=/opt/moneymaker
 VENV=$APP/.venv
 
+# Create service account if this is a fresh instance
+if ! id -u moneymaker &>/dev/null; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin moneymaker
+fi
+
 # Ensure runtime dirs exist with correct ownership (never overwritten by CodeDeploy)
 for dir in logs reports models; do
     mkdir -p "$APP/$dir"
