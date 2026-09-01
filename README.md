@@ -68,3 +68,4 @@ tests/       test_core.py · test_trading_env.py · test_bots.py
 ## Risk Controls
 
 All bots share the same `RiskManager`: ATR-based position sizing (risk 1% of capital per trade), 20% max single-position cap, and a 3% daily-loss circuit breaker that halts trading for the day.
+# deployment pipeline test 2026-09-01T16:57:09Z

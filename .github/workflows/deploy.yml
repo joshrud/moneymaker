@@ -66,7 +66,7 @@ jobs:
             --application-name moneymaker \
             --deployment-group-name moneymaker-production \
             --s3-location bucket=${{ vars.S3_DEPLOY_BUCKET }},key=moneymaker/deploy-${{ github.sha }}.zip,bundleType=zip \
-            --deployment-config-name CodeDeployDefault.OneAtATime \
+            --deployment-config-name CodeDeployDefault.AllAtOnce \
             --description "git ${{ github.sha }}: ${{ github.event.head_commit.message }}" \
             --query "deploymentId" \
             --output text)
